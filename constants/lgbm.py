@@ -1,0 +1,20 @@
+# Description: Constants for LightGBM
+DEFAULT_LGBM_PARAMS = {
+    "objective": "binary",
+    "num_iterations": 2000,
+    "metric": ["auc", "binary_logloss"],
+    "boosting_type": "gbdt",
+    "learning_rate": 0.2,
+    "feature_fraction": 0.6,
+    "bagging_fraction": 0.6,
+    "bagging_freq": 4,
+    "max_depth": 3,
+    "num_threads": -1,
+    "tree_learner": "feature",
+    "lambda_l2": 0.05,
+    "path_smooth": 128,
+    "early_stopping_round": 100,
+    "feature_pre_filter": False,
+    "verbose_eval": 10,
+    "first_metric_only": True,
+}
