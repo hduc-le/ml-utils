@@ -236,9 +236,11 @@ class InteractionTargetEncoderCustom(BaseEstimator, TransformerMixin):
         Parameters:
         column1 (str): The name of the first column.
         column2 (str): The name of the second column.
+        ref_id (str): Reference identifier (stored but not used in encoding).
         """
         self.column1 = column1
         self.column2 = column2
+        self.ref_id = ref_id
         self.encodings = None
 
     def fit(self, X, y):
@@ -298,6 +300,7 @@ class BucketTargetEncoder(BaseEstimator, TransformerMixin):
         """
         self.columns = columns
         self.encodings = {}
+        self.bins = {}
 
     def fit(self, X, y):
         """
@@ -312,9 +315,11 @@ class BucketTargetEncoder(BaseEstimator, TransformerMixin):
         """
         for column in self.columns:
             X_transformed = X.copy()
-            X_transformed[f"{column}_bucket_target"] = pd.cut(
-                X_transformed[column], bins=20, duplicates="drop"
+            bucketed, bin_edges = pd.cut(
+                X_transformed[column], bins=20, duplicates="drop", retbins=True
             )
+            X_transformed[f"{column}_bucket_target"] = bucketed
+            self.bins[column] = bin_edges
             self.encodings[f"{column}_bucket_target"] = y.groupby(
                 X_transformed[f"{column}_bucket_target"]
             ).mean()
@@ -334,7 +339,10 @@ class BucketTargetEncoder(BaseEstimator, TransformerMixin):
 
         for column in self.columns:
             X_transformed[f"{column}_bucket_target_key"] = pd.cut(
-                X_transformed[column], bins=20, duplicates="drop"
+                X_transformed[column],
+                bins=self.bins[column],
+                duplicates="drop",
+                include_lowest=True,
             ).astype("category")
             X_transformed[f"{column}_bucket_target"] = X_transformed[
                 f"{column}_bucket_target_key"

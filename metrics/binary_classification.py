@@ -208,9 +208,9 @@ def plot_calibration_curve_with_count(
             ),
         ],
         layout={
-            "yaxis": {"title": "SF Zoo axis"},
+            "yaxis": {"title": "True Probability"},
             "yaxis2": {
-                "title": "LA Zoo axis",
+                "title": "Sample Count",
                 "overlaying": "y",
                 "side": "right",
             },

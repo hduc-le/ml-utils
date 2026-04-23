@@ -23,7 +23,7 @@ def logger_func(call_depth=0):
                 call_depth -= 1
             end = _time.perf_counter()
             logger.info(
-                f"{indent}----- {function.__name__}: end took {end - start:.6f} | {datetime.now()} seconds to complete -----"
+                f"{indent}----- {function.__name__}: end took {end - start:.6f}s | {datetime.now()} -----"
             )
             return output
 

@@ -163,7 +163,7 @@ class BigqueryHelper:
             query_job = self.client.query(query, job_config=job_config)
             return query_job.total_bytes_processed / self.BYTES_PER_GB
         except GoogleAPIError as e:
-            print(f"Failed to estimate query size: {e}")
+            logging.error(f"Failed to estimate query size: {e}")
             return None
 
     @logger_func(call_depth=0)
@@ -254,17 +254,36 @@ class BigqueryHelper:
     def query_to_csv(self, query: str, gcs_path: str) -> str:
         """Run a SQL query and save the result as a CSV file in Google Cloud Storage.
 
+        Runs the query into a temporary BigQuery table and then exports it to GCS.
+        The temporary table is deleted after the export.
+
         Args:
             query (str): The SQL query to execute.
-            gcs_path (str): The GCS path to save the CSV file.
+            gcs_path (str): The GCS path to save the CSV file (e.g. gs://bucket/file_*.csv).
         Returns:
             str: The GCS path of the saved CSV file.
         """
-        job_config = bigquery.QueryJobConfig(
-            destination=gcs_path, write_disposition="WRITE_TRUNCATE"
+        import uuid
+        temp_table_id = f"{self.project_id}.{self.dataset_name}._tmp_export_{uuid.uuid4().hex}"
+        query_job = self.client.query(
+            query,
+            job_config=bigquery.QueryJobConfig(
+                destination=temp_table_id, write_disposition="WRITE_TRUNCATE"
+            ),
         )
-        query_job = self.client.query(query, job_config=job_config)
         query_job.result()
+        try:
+            extract_job = self.client.extract_table(
+                temp_table_id,
+                gcs_path,
+                job_config=bigquery.ExtractJobConfig(
+                    destination_format=bigquery.DestinationFormat.CSV,
+                    print_header=True,
+                ),
+            )
+            extract_job.result()
+        finally:
+            self.client.delete_table(temp_table_id, not_found_ok=True)
         return gcs_path
 
     @logger_func(call_depth=0)
@@ -318,6 +337,8 @@ class BigqueryHelper:
             start_index=start_index,
         )
         results = [x for x in rows]
+        if not results:
+            return pd.DataFrame()
         return pd.DataFrame(
             data=[list(x.values()) for x in results],
             columns=list(results[0].keys()),
@@ -333,9 +354,9 @@ class BigqueryHelper:
         table_ref = self.client.dataset(self.dataset_name).table(table_name)
         try:
             self.client.delete_table(table_ref)
-            print(f"Table {table_name} deleted.")
+            logging.info(f"Table {table_name} deleted.")
         except GoogleAPIError as e:
-            print(f"Failed to delete table {table_name}: {e}")
+            logging.error(f"Failed to delete table {table_name}: {e}")
 
     def write_to_table(self, df, identifier, if_exists="fail"):
         """
@@ -364,8 +385,8 @@ class BigqueryHelper:
                 df, table_ref, job_config=job_config
             )
             load_job.result()  # Wait for job to complete
-            print(
+            logging.info(
                 f"Data written to table {table_name} with disposition '{if_exists}'."
             )
         except GoogleAPIError as e:
-            print(f"Failed to write to table {table_name}: {e}")
+            logging.error(f"Failed to write to table {table_name}: {e}")

@@ -3,11 +3,7 @@ from collections import Counter
 
 import numpy as np
 import pandas as pd
-from sklearn.base import BaseEstimator, TransformerMixin
-from collections import Counter
 import pytz
-
-import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 
 
@@ -78,7 +74,7 @@ class InteractionTargetEncoderCustom(BaseEstimator, TransformerMixin):
 
         elif format in ["floating_icon"]:
             if "TransferRecent" in ref_id and "HomeScreen" in ref_id:
-                return f"format"
+                return f"{format}"
             elif "HomeScreen" in ref_id:
                 return f"HomeScreen_{format}"
             elif "TransferRecent" in ref_id:
@@ -270,6 +266,7 @@ class DaysTargetEncoder(BaseEstimator, TransformerMixin):
         self.end_date_column = end_date_column
         self.new_column = new_column
         self.encodings = None
+        self.day_bins = None
 
     def fit(self, X, y):
         """
@@ -304,10 +301,11 @@ class DaysTargetEncoder(BaseEstimator, TransformerMixin):
         X_transformed[self.new_column] = (
             X_transformed[self.end_date_column] - X_transformed[self.start_date_column]
         ).dt.days
-        # Bin the number of days into 20 categories
-        X_transformed[self.new_column] = pd.cut(
-            X_transformed[self.new_column], bins=20, labels=False
+        # Bin the number of days into 20 categories and save bin edges for transform
+        bucketed, self.day_bins = pd.cut(
+            X_transformed[self.new_column], bins=20, labels=False, retbins=True
         )
+        X_transformed[self.new_column] = bucketed
         # Compute target means for each bin
         self.encodings = y.groupby(X_transformed[self.new_column]).mean()
 
@@ -346,9 +344,9 @@ class DaysTargetEncoder(BaseEstimator, TransformerMixin):
             X_transformed[self.end_date_column] - X_transformed[self.start_date_column]
         ).dt.days
 
-        # Bin the number of days into 20 categories
+        # Reuse the bin edges from fit to ensure consistent binning
         X_transformed[self.new_column] = pd.cut(
-            X_transformed[self.new_column], bins=20, labels=False
+            X_transformed[self.new_column], bins=self.day_bins, labels=False, include_lowest=True
         )
 
         # Replace the bins with the target means
@@ -378,6 +376,7 @@ class BudgetDaysTargetEncoder(BaseEstimator, TransformerMixin):
         self.end_date_column = end_date_column
         self.new_column = new_column
         self.encodings = None
+        self.rate_bins = None
 
     def fit(self, X, y):
         """
@@ -399,10 +398,6 @@ class BudgetDaysTargetEncoder(BaseEstimator, TransformerMixin):
             X_transformed[self.end_date_column]
         )
 
-        X_transformed[self.budget + "_bin"] = pd.cut(
-            X_transformed[self.budget], bins=20, labels=False
-        )
-
         # Ensure both datetime columns are timezone aware
         if X_transformed[self.start_date_column].dt.tz is None:
             X_transformed[self.start_date_column] = X_transformed[
@@ -413,40 +408,26 @@ class BudgetDaysTargetEncoder(BaseEstimator, TransformerMixin):
                 self.end_date_column
             ].dt.tz_localize("Asia/Ho_Chi_Minh")
 
-        X_transformed[self.budget + "_" + "num_days_rate"] = X_transformed[
-            self.budget
-        ] / (
+        rate_col = self.budget + "_num_days_rate"
+        rate_bin_col = self.budget + "_num_days_rate_bin"
+
+        X_transformed[rate_col] = X_transformed[self.budget] / (
             (
                 X_transformed[self.end_date_column]
                 - X_transformed[self.start_date_column]
             ).dt.days
             + 1
         )
-
-        # Replace positive infinity values with NaN
-        X_transformed.loc[
-            X_transformed[self.budget + "_" + "num_days_rate"] == np.inf,
-            self.budget + "_" + "num_days_rate",
-        ] = np.nan
-        # Replace negative infinity values with NaN
-        X_transformed.loc[
-            X_transformed[self.budget + "_" + "num_days_rate"] == -np.inf,
-            self.budget + "_" + "num_days_rate",
-        ] = np.nan
-        # Now you can use pd.cut function
-        X_transformed[self.budget + "_" + "num_days_rate_bin"] = pd.cut(
-            X_transformed[self.budget + "_" + "num_days_rate"], bins=20, labels=False
+        X_transformed[rate_col] = X_transformed[rate_col].replace(
+            [np.inf, -np.inf], np.nan
         )
-        # Bin the number of days into 20 categories
-        X_transformed[self.budget + "_" + "num_days_rate_bin"] = pd.cut(
-            X_transformed[self.budget + "_" + "num_days_rate"].fillna(0),
-            bins=20,
-            labels=False,
+        # Bin the rate and save edges for consistent binning in transform
+        bucketed, self.rate_bins = pd.cut(
+            X_transformed[rate_col].fillna(0), bins=20, labels=False, retbins=True
         )
+        X_transformed[rate_bin_col] = bucketed
         # Compute target means for each bin
-        self.encodings = y.groupby(
-            X_transformed[self.budget + "_" + "num_days_rate_bin"]
-        ).mean()
+        self.encodings = y.groupby(X_transformed[rate_bin_col]).mean()
 
         return self
 
@@ -478,33 +459,30 @@ class BudgetDaysTargetEncoder(BaseEstimator, TransformerMixin):
                 self.end_date_column
             ].dt.tz_localize("Asia/Ho_Chi_Minh")
 
-        # Calculate the number of days between the start and end dates
-        X_transformed[self.budget + "_" + "num_days_rate"] = (
-            X_transformed[self.budget]
-            / (
+        rate_col = self.budget + "_num_days_rate"
+        rate_bin_col = self.budget + "_num_days_rate_bin"
+
+        # Use +1 consistent with fit to avoid division by zero for same-day campaigns
+        X_transformed[rate_col] = X_transformed[self.budget] / (
+            (
                 X_transformed[self.end_date_column]
                 - X_transformed[self.start_date_column]
             ).dt.days
+            + 1
         )
-        # Replace positive infinity values with NaN
-        X_transformed.loc[
-            X_transformed[self.budget + "_" + "num_days_rate"] == np.inf,
-            self.budget + "_" + "num_days_rate",
-        ] = np.nan
-        # Replace negative infinity values with NaN
-        X_transformed.loc[
-            X_transformed[self.budget + "_" + "num_days_rate"] == -np.inf,
-            self.budget + "_" + "num_days_rate",
-        ] = np.nan
-        # Bin the number of days into 20 categories
-        X_transformed[self.budget + "_" + "num_days_rate_bin"] = pd.cut(
-            X_transformed[self.budget + "_" + "num_days_rate"], bins=20, labels=False
+        X_transformed[rate_col] = X_transformed[rate_col].replace(
+            [np.inf, -np.inf], np.nan
+        )
+        # Reuse bin edges from fit for consistent binning
+        X_transformed[rate_bin_col] = pd.cut(
+            X_transformed[rate_col].fillna(0),
+            bins=self.rate_bins,
+            labels=False,
+            include_lowest=True,
         )
 
         # Replace the bins with the target means
-        X_transformed[self.budget + "_" + "num_days_rate_bin"] = X_transformed[
-            self.budget + "_" + "num_days_rate_bin"
-        ].map(self.encodings)
+        X_transformed[rate_bin_col] = X_transformed[rate_bin_col].map(self.encodings)
 
         return X_transformed
 
