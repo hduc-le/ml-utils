@@ -219,6 +219,243 @@ print(report[["decile", "Precision (%)", "Recall (%)", "Precision_acc (%)", "Rec
 
 ## `eda/`
 
+Exploratory data analysis utilities for notebooks and reports. All plotting functions return interactive Plotly figures unless noted otherwise.
+
+---
+
+### `eda_common.py` / `describe_utils.py`
+
+General-purpose EDA building blocks shared across the other describe modules.
+
+**`data_overview(df)`** — column-level data quality scan. Returns a styled DataFrame with null rates, zero rates, blank rates, duplicate rates, unique counts, and hit rate. Problem columns are colour-coded automatically (red = high nulls/zeros, blue = low cardinality, yellow = constant).
+
+```python
+from eda.eda_common import data_overview
+
+overview = data_overview(df)
+display(overview)                      # renders styled table in a notebook
+
+# verbose=True also shows the mode value and its frequency per column
+overview = data_overview(df, verbose=True)
+display(overview)
+```
+
+**`describe_percentiles` / `describe_percentiles_shortened`** — detailed univariate stats for a numeric column, including trimmed mean, MAD, IQR, skewness, and kurtosis.
+
+```python
+from eda.eda_common import describe_percentiles, describe_percentiles_shortened
+
+# Full percentile table (1st–99th) + skew/kurt/null rate
+stats = describe_percentiles(df, col="amount")
+display(stats)
+# stat     value
+# count    50,000
+# mean      1,234.56
+# std         987.12
+# null         2.30%
+# skew          1.84
+# kurt          5.21
+# 1%           12.0
+# ...
+# 99%       8,750.0
+
+# Shortened version adds: trimmed mean, mode, MAD, range, IQR
+stats = describe_percentiles_shortened(df, col="amount")
+display(stats)
+```
+
+**`describe_numeric_with_label`** — compare percentile distributions of a numeric feature across label classes, side by side.
+
+```python
+from eda.eda_common import describe_numeric_with_label
+
+stats = describe_numeric_with_label(df, column_name="credit_score", label="default")
+display(stats)
+# Describe    Label_0    Label_1
+# count         42000       8000
+# mean            680        520
+# 10%             580        410
+# ...
+```
+
+**`describe_sns_2d_numeric_with_label`** — KDE and stacked histogram of a numeric feature split by label. Useful for spotting separability.
+
+```python
+from eda.eda_common import describe_sns_2d_numeric_with_label
+
+fig, ax = describe_sns_2d_numeric_with_label(df, feature_name="income", label_name="default")
+```
+
+**`descibe_2d_category_data_extend`** — cross-tabulation of two categorical columns with row % (horizontal) and column % (vertical).
+
+```python
+from eda.eda_common import descibe_2d_category_data_extend, describe_cate_with_label_stype
+
+cross = descibe_2d_category_data_extend(
+    df, cate_col1="product_category", cate_col2="default",
+    threshold_cate_1=9, threshold_cate_2=9,
+)
+# Add colour highlighting — red = highest rate, blue = lowest
+styled = describe_cate_with_label_stype(cross)
+display(styled)
+```
+
+**`plot_correlation`** — seaborn heatmap of feature correlations, filtered to pairs above a threshold.
+
+```python
+from eda.eda_common import plot_correlation
+
+# Only show pairs with correlation > 0.7 to cut through noise
+plot_correlation(df[feature_cols], tshold=0.7, title="Feature Correlation Matrix")
+```
+
+**`tables_side_by_side`** — render multiple DataFrames next to each other in a notebook, each with its own caption.
+
+```python
+from eda.eda_common import tables_side_by_side
+
+tables_side_by_side(
+    {
+        "Train stats": train_stats_df,
+        "Val stats":   val_stats_df,
+        "Test stats":  test_stats_df,
+    },
+    name="Percentile comparison across splits",
+    with_grad=True,   # adds background gradient for quick scanning
+)
+```
+
+**Layout helpers** — compose plots and DataFrames side by side in notebook HTML output.
+
+```python
+from eda.describe_utils import display_hstack
+from eda.eda_common import describe_percentiles_shortened
+
+stats_amount  = describe_percentiles_shortened(df, col="amount")
+stats_balance = describe_percentiles_shortened(df, col="balance")
+
+# Render both stat tables next to each other
+display_hstack([stats_amount, stats_balance], margin=50)
+```
+
+---
+
+### `describe_calibration.py`
+
+Model calibration diagnostics.
+
+**`plot_calibration_curve_with_count`** — calibration curve with per-bin sample counts on the right y-axis, plus ECE in a summary table. Returns an `ipywidgets.HBox` for inline notebook display.
+
+```python
+from eda.describe_calibration import plot_calibration_curve_with_count
+
+widget = plot_calibration_curve_with_count(
+    y_true=y_test,
+    y_pred=model.predict_proba(X_test)[:, 1],
+    n_bin=10,
+    title="Logistic Regression — Calibration",
+)
+display(widget)
+# Left panel:  calibration curve vs. perfect diagonal
+# Right panel: ECE = 0.032
+```
+
+**`expected_calibration_error`** — compute ECE directly.
+
+```python
+from eda.describe_calibration import expected_calibration_error
+
+ece = expected_calibration_error(y_true=y_test, y_pred=y_pred_proba, n_bins=10)
+print(f"ECE: {ece:.4f}")
+# ECE: 0.0321
+```
+
+---
+
+### `describe_correlation.py`
+
+**`plot_confusion_matrix_with_details`** — matplotlib confusion matrix annotated with raw counts, row percentages, and per-class precision on the right margin.
+
+```python
+from eda.describe_correlation import plot_confusion_matrix_with_details
+
+y_pred_labels = (model.predict_proba(X_test)[:, 1] >= 0.4).astype(int)
+
+plot_confusion_matrix_with_details(
+    y_true=y_test,
+    y_pred=y_pred_labels,
+    labels=[0, 1],
+    figsize=(8, 8),
+)
+# Each cell:  count and (row %)
+# Diagonal:   black text
+# Off-diagonal: red text
+# Right margin: Precision: 0.73 / 0.61
+```
+
+---
+
+### `describe_datetime.py`
+
+Time-series EDA plots — all render interactive Plotly figures inline.
+
+**`plotly_ts_box_plot`** — distribution of a numeric variable over time periods as box plots, with optional percentile clipping.
+
+```python
+from eda.describe_datetime import plotly_ts_box_plot
+
+plotly_ts_box_plot(
+    pdf=df,
+    col_datetime="week",
+    col_target="transaction_amount",
+    title="Weekly transaction amount distribution",
+    lower_bound=0.01,   # clip below 1st percentile
+    upper_bound=0.99,   # clip above 99th percentile
+)
+```
+
+**`plot_1d_distinct_values_over_time`** — distinct value count of a column per time period, shown as a table and line chart side by side.
+
+```python
+from eda.describe_datetime import plot_1d_distinct_values_over_time
+
+plot_1d_distinct_values_over_time(
+    df=df,
+    time_column="month",
+    value_column="user_id",
+    title="Monthly active users",
+)
+```
+
+**`plot_2d_distinct_values_over_time`** — same, broken down by a third categorical column, rendered as a stacked bar chart.
+
+```python
+from eda.describe_datetime import plot_2d_distinct_values_over_time
+
+plot_2d_distinct_values_over_time(
+    df=df,
+    time_column="month",
+    value_column="user_id",
+    breakdown_column="product_type",
+    title="Monthly active users by product",
+)
+```
+
+**`plot_1d_sum_values_over_time`** — sum of a numeric column per time period, shown as table + line chart.
+
+```python
+from eda.describe_datetime import plot_1d_sum_values_over_time
+
+plot_1d_sum_values_over_time(
+    df=df,
+    time_column="month",
+    value_column="revenue",
+    title="Monthly revenue",
+)
+```
+
+---
+
 ### `psi.py`
 
 Monitor feature distribution shift between training and production data.
@@ -241,6 +478,75 @@ X_train = df_train[feature_cols].values
 X_prod  = df_prod[feature_cols].values
 psi_values = calculate_psi(X_train, X_prod, buckettype="quantiles", buckets=10, axis=0)
 # → array of PSI per feature
+
+# Summarise as a DataFrame
+psi_df = pd.Series(psi_values, index=feature_cols).sort_values(ascending=False).to_frame("PSI")
+print(psi_df)
+# feature            PSI
+# credit_score     0.312   ← drifted
+# income           0.087
+# tenure_days      0.041
+```
+
+---
+
+### `adhoc.py`
+
+Forecast evaluation utilities designed for regression / demand forecasting tasks.
+
+**`compare_distribution`** — stacked histograms of the target variable across train/val/test splits. Useful for spotting distribution shift between splits.
+
+```python
+from eda.adhoc import compare_distribution
+
+compare_distribution(
+    pdf01_train=df_train,
+    pdf01_val=df_val,
+    pdf01_test=df_test,
+    cname_target="demand",
+    nbins=50,
+)
+```
+
+**`evaluate_predictions`** — tolerance-based accuracy at multiple thresholds (±5% to ±50% of actuals). Shows how many predictions fall within X% of the true value across all splits.
+
+```python
+from eda.adhoc import evaluate_predictions
+
+df_records, df_accuracy = evaluate_predictions(
+    pdf_train=df_train,
+    pdf_val=df_val,
+    pdf_test=df_test,
+    cname_target="demand",
+    predicted_col="predicted_demand",
+)
+
+print(df_accuracy)
+#        5%     10%     20%     30%     50%
+# Train  28.4   51.2    74.3    86.1    95.4
+# Val    26.1   48.7    71.0    83.5    93.8
+# Test   25.9   47.5    70.2    82.9    93.1
+```
+
+**`accuracy_over_breakdown_col`** — same tolerance-based accuracy grouped by a time or categorical column, to detect temporal degradation or segment-level weakness.
+
+```python
+from eda.adhoc import accuracy_over_breakdown_col
+
+df_accuracy, df_sample = accuracy_over_breakdown_col(
+    pdf_train=df_train,
+    cname_target="demand",
+    col_breakdown="etl_date",
+    predicted_col="predicted_demand",
+)
+
+print(df_accuracy)
+#               5%     10%     20%
+# 2024-01-01   29.3   52.0    75.1
+# 2024-01-08   27.1   50.4    73.2
+# 2024-01-15   24.8   47.9    70.5   ← accuracy declining over time
+
+print(df_sample)   # row counts per period to sanity-check thin slices
 ```
 
 ---
